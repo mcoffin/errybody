@@ -1,0 +1,8 @@
+{
+  "name": "errybody",
+  "private": true,
+  "dependencies": {
+    "minimist": "^1.2.0",
+    "uuid": "^3.0.1"
+  }
+}

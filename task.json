@@ -1,0 +1,23 @@
+{
+    "name": "Test Task",
+    "task_id": {
+        "value": ""
+    },
+    "agent_id": {
+        "value": ""
+    },
+    "command": {
+        "shell": true,
+        "value": "while true; do sleep 60; echo heartbeat; done"
+    },
+    "resources": [
+        {
+            "name": "cpus",
+            "role": "*",
+            "type": "SCALAR",
+            "scalar": {
+                "value": 0.05
+            }
+        }
+    ]
+}
