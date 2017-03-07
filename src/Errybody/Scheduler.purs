@@ -19,7 +19,7 @@ import Data.StrMap as SM
 import Data.Traversable (for)
 import Errybody.Config (Config)
 import Errybody.UUID (GENUUID, UUIDVersion(..), genUUID)
-import Mesos.Raw (Filters(..), TaskStatus(..), Offer(..), Value(..), TaskInfo(..))
+import Mesos.Raw (AgentID, TaskID, Filters(..), TaskStatus(..), Offer(..), Value(..), TaskInfo(..))
 import Mesos.Raw.Offer (Operation(..))
 import Mesos.Scheduler (Accept(..), Message(..), Subscribed, Acknowlege(..), ReconcileTask(..), accept)
 import Mesos.Util (throwErrorS)
@@ -36,9 +36,30 @@ initialState = { tasks: SM.empty
                , slaves: SM.empty
                }
 
+initialTaskStatus :: TaskID -> Maybe AgentID -> TaskStatus
+initialTaskStatus taskId slaveId = TaskStatus $
+    { taskId: taskId
+    , state: "TASK_STAGING"
+    , message: Nothing
+    , source: Nothing
+    , reason: Nothing
+    , data: Nothing
+    , slaveId: slaveId
+    , executorId: Nothing
+    , timestamp: Nothing
+    , uuid: Nothing
+    , healthy: Nothing
+    , labels: Nothing
+    , containerStatus: Nothing
+    }
+
 registerTask :: forall m. (MonadState SchedulerState m) => ReconcileTask -> m Unit
-registerTask (ReconcileTask t) =
+registerTask (ReconcileTask t) = do
     modify \origState -> origState { tasks = SM.insert (unwrap t.taskId) (ReconcileTask t) origState.tasks }
+    case t.slaveId of
+      Just slaveId ->
+          modify \origState -> origState { slaves = SM.insert (unwrap slaveId) (initialTaskStatus t.taskId t.slaveId) origState.slaves }
+      Nothing -> pure unit
 
 waitForSubscription :: forall eff. AVar Message -> Aff (avar :: AVAR, console :: CONSOLE | eff) Subscribed
 waitForSubscription v = waitForSubscriptionImpl unit where
@@ -78,16 +99,20 @@ handleMessages cfg v = flip evalStateT initialState $ forever do
               Just (AcknowlegeMessage fwid (Acknowlege ack)) -> do
                   let acknowlegeMessage = AcknowlegeMessage fwid $ Acknowlege ack
                   lift $ accept' acknowlegeMessage
-                  if status.state == "TASK_RUNNING"
-                     then modify \origState -> origState { slaves = SM.insert (unwrap ack.slaveId) (TaskStatus status) origState.slaves }
-                     else modify \origState -> origState { slaves = SM.update (pure Nothing) (unwrap ack.slaveId) origState.slaves }
+                  modify \origState -> origState { slaves = SM.insert (unwrap ack.slaveId) (TaskStatus status) origState.slaves }
                   pure unit
               Just _ -> throwErrorS "We somehow created an AcknowlegeMessage that isn't an AcknowlegeMessage"
               Nothing -> pure unit
         handleOffers :: forall eff0. Array Offer -> StateT SchedulerState (Aff (err :: EXCEPTION, http :: HTTP.HTTP, avar :: AVAR, console :: CONSOLE, genuuid :: GENUUID | eff0)) Unit
         handleOffers offers = do
             beforeTasks <- gets (\s -> s.slaves)
-            let relevantOffers = flip filter offers \(Offer offer) -> (not SM.member) (unwrap offer.slaveId) beforeTasks
+            let relevantOffers =
+                    flip filter offers \(Offer offer) ->
+                        case (\(TaskStatus status) -> status.state) <$> SM.lookup (unwrap offer.slaveId) beforeTasks of
+                          Just "TASK_RUNNING" -> false
+                          Just "TASK_STARTING" -> false
+                          Just "TASK_RUNNING" -> false
+                          _ -> true
                 baseTaskInfo = unwrap cfg.baseTaskInfo
             taskInfos <- lift <<< liftEff $ for relevantOffers \(Offer offer) -> do
                 taskId <- genUUID UUIDV4
