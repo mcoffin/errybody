@@ -11,4 +11,5 @@ COPY bower.json /usr/src/app
 RUN npm run-script bower -- --allow-root i
 
 COPY . /usr/src/app
-CMD [ "node", "/usr/src/app/index.js" ]
+ENTRYPOINT [ "/usr/src/app/docker-entrypoint.sh" ]
+CMD [ "errybody" ]
