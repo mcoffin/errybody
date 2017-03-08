@@ -60,7 +60,7 @@ defaultProtocolPort "http:" = Just 80
 defaultProtocolPort "https:" = Just 443
 defaultProtocolPort _ = Nothing
 
-subscribeOptions :: forall m. (MonadError InitializationError m) => StrMap Arg -> m (Options RequestOptions)
+subscribeOptions :: ∀ m. (MonadError InitializationError m) => StrMap Arg -> m (Options RequestOptions)
 subscribeOptions args = flip execStateT mempty do
     maybeMasterAuth <- lift authString
     case maybeMasterAuth of
@@ -88,7 +88,7 @@ subscribeOptions args = flip execStateT mempty do
               Tuple (Just _) Nothing -> throwError $ ErrorAtArgument "principal" (RequiredArgument "secret")
               Tuple Nothing (Just _) -> throwError $ ErrorAtArgument "secret" (RequiredArgument "principal")
 
-valueOf :: forall a. Value a -> a
+valueOf :: ∀ a. Value a -> a
 valueOf (Value a) = a
 
 defaultUser :: String
@@ -97,7 +97,7 @@ defaultUser = "root"
 defaultName :: String
 defaultName = "errybody"
 
-frameworkInfo :: forall m. (MonadError InitializationError m) => StrMap Arg -> m FrameworkInfo
+frameworkInfo :: ∀ m. (MonadError InitializationError m) => StrMap Arg -> m FrameworkInfo
 frameworkInfo args = pure <<< FrameworkInfo $
     { user: fromMaybe defaultUser userOpt
     , name: fromMaybe defaultName frameworkNameOpt
@@ -116,7 +116,7 @@ frameworkInfo args = pure <<< FrameworkInfo $
         userPrincipal = lookup "principal" args >>= stringArg
         userHostname = lookup "hostname" args >>= stringArg
 
-getTaskInfo :: forall eff. StrMap Arg -> Aff (fs :: FS | eff) TaskInfo
+getTaskInfo :: ∀ ε. StrMap Arg -> Aff (fs :: FS | ε) TaskInfo
 getTaskInfo args = do
     path <- maybe' (\_ -> throwErrorS "You must supply a task") pure $ lookup "task" args >>= stringArg
     jsonTaskInfo <- readTextFile Encoding.UTF8 path
