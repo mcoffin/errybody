@@ -18,6 +18,7 @@ import Data.StrMap (StrMap)
 import Data.StrMap as SM
 import Data.Traversable (for)
 import Errybody.Config (Config)
+import Errybody.Resources (resourcesContain)
 import Errybody.UUID (GENUUID, UUIDVersion(..), genUUID)
 import Mesos.Raw (AgentID, TaskID, Filters(..), TaskStatus(..), Offer(..), Value(..), TaskInfo(..))
 import Mesos.Raw.Offer (Operation(..))
@@ -53,7 +54,7 @@ initialTaskStatus taskId slaveId = TaskStatus $
     , containerStatus: Nothing
     }
 
-registerTask :: forall m. (MonadState SchedulerState m) => ReconcileTask -> m Unit
+registerTask :: ∀ m. (MonadState SchedulerState m) => ReconcileTask -> m Unit
 registerTask (ReconcileTask t) = do
     modify \origState -> origState { tasks = SM.insert (unwrap t.taskId) (ReconcileTask t) origState.tasks }
     case t.slaveId of
@@ -61,7 +62,7 @@ registerTask (ReconcileTask t) = do
           modify \origState -> origState { slaves = SM.insert (unwrap slaveId) (initialTaskStatus t.taskId t.slaveId) origState.slaves }
       Nothing -> pure unit
 
-waitForSubscription :: forall eff. AVar Message -> Aff (avar :: AVAR, console :: CONSOLE | eff) Subscribed
+waitForSubscription :: ∀ eff. AVar Message -> Aff (avar :: AVAR, console :: CONSOLE | eff) Subscribed
 waitForSubscription v = waitForSubscriptionImpl unit where
     waitForSubscriptionImpl = tailRecM \_ -> do
         msg <- takeVar v
@@ -69,7 +70,7 @@ waitForSubscription v = waitForSubscriptionImpl unit where
           SubscribedMessage subscribedInfo -> pure <<< Done $ subscribedInfo
           _ -> pure $ Loop unit
 
-handleMessages :: forall eff. Config -> AVar Message -> Aff (err :: EXCEPTION, http :: HTTP.HTTP, avar :: AVAR, console :: CONSOLE, genuuid :: GENUUID | eff) Unit
+handleMessages :: ∀ eff. Config -> AVar Message -> Aff (err :: EXCEPTION, http :: HTTP.HTTP, avar :: AVAR, console :: CONSOLE, genuuid :: GENUUID | eff) Unit
 handleMessages cfg v = flip evalStateT initialState $ forever do
     msg <- lift $ takeVar v
     lift <<< liftEff $ logShow msg
@@ -78,11 +79,11 @@ handleMessages cfg v = flip evalStateT initialState $ forever do
       UpdateMessage status -> handleUpdate status
       _ -> pure unit
     where
-        accept' :: forall eff0. Message -> Aff (err :: EXCEPTION, http :: HTTP.HTTP, avar :: AVAR, console :: CONSOLE | eff0) Response
+        accept' :: ∀ eff0. Message -> Aff (err :: EXCEPTION, http :: HTTP.HTTP, avar :: AVAR, console :: CONSOLE | eff0) Response
         accept' message = do
             liftEff $ logShow message
             accept cfg.masterRequestOptions cfg.streamId message
-        handleUpdate :: forall eff0. TaskStatus -> StateT SchedulerState (Aff (err :: EXCEPTION, http :: HTTP.HTTP, avar :: AVAR, console :: CONSOLE, genuuid :: GENUUID | eff0)) Unit
+        handleUpdate :: ∀ eff0. TaskStatus -> StateT SchedulerState (Aff (err :: EXCEPTION, http :: HTTP.HTTP, avar :: AVAR, console :: CONSOLE, genuuid :: GENUUID | eff0)) Unit
         handleUpdate (TaskStatus status) = do
             maybeTask <- SM.lookup (unwrap status.taskId) <$> gets \s -> s.tasks
             let maybeAcknowlegeMessage =
@@ -103,17 +104,17 @@ handleMessages cfg v = flip evalStateT initialState $ forever do
                   pure unit
               Just _ -> throwErrorS "We somehow created an AcknowlegeMessage that isn't an AcknowlegeMessage"
               Nothing -> pure unit
-        handleOffers :: forall eff0. Array Offer -> StateT SchedulerState (Aff (err :: EXCEPTION, http :: HTTP.HTTP, avar :: AVAR, console :: CONSOLE, genuuid :: GENUUID | eff0)) Unit
+        handleOffers :: ∀ eff0. Array Offer -> StateT SchedulerState (Aff (err :: EXCEPTION, http :: HTTP.HTTP, avar :: AVAR, console :: CONSOLE, genuuid :: GENUUID | eff0)) Unit
         handleOffers offers = do
             beforeTasks <- gets (\s -> s.slaves)
-            let relevantOffers =
+            let baseTaskInfo = unwrap cfg.baseTaskInfo
+                relevantOffers =
                     flip filter offers \(Offer offer) ->
                         case (\(TaskStatus status) -> status.state) <$> SM.lookup (unwrap offer.slaveId) beforeTasks of
-                          Just "TASK_RUNNING" -> false
+                          Just "TASK_STAGING" -> false
                           Just "TASK_STARTING" -> false
                           Just "TASK_RUNNING" -> false
-                          _ -> true
-                baseTaskInfo = unwrap cfg.baseTaskInfo
+                          _ -> resourcesContain baseTaskInfo.resources offer.resources
             taskInfos <- lift <<< liftEff $ for relevantOffers \(Offer offer) -> do
                 taskId <- genUUID UUIDV4
                 pure <<< TaskInfo $
