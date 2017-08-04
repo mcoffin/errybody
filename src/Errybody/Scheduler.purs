@@ -125,7 +125,7 @@ handleMessages cfg v = flip evalStateT initialState $ forever do
             let acceptMessage =
                     AcceptMessage cfg.frameworkId $ Accept
                         { offerIds: offerIds
-                        , operations: A.singleton $ LaunchOperation taskInfos
+                        , operations: (LaunchOperation <<< A.singleton) <$>  taskInfos
                         , filters: Just $ Filters { refuseSeconds: Just 10.0 }
                         }
             lift $ accept' acceptMessage
