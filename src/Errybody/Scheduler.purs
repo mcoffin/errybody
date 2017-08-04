@@ -17,6 +17,7 @@ import Data.Newtype (unwrap)
 import Data.StrMap (StrMap)
 import Data.StrMap as SM
 import Data.Traversable (for)
+import Data.Tuple (Tuple(..), snd)
 import Errybody.Config (Config)
 import Errybody.Resources (resourcesContain)
 import Errybody.UUID (GENUUID, UUIDVersion(..), genUUID)
@@ -118,20 +119,23 @@ handleMessages cfg v = flip evalStateT initialState $ forever do
                           Just "TASK_STARTING" -> false
                           Just "TASK_RUNNING" -> false
                           _ -> resourcesContain baseTaskInfo.resources offer.resources
-            taskInfos <- lift <<< liftEff $ for relevantOffers \(Offer offer) -> do
+            taskInfoTuples <- lift <<< liftEff $ for relevantOffers \(Offer offer) -> do
                 taskId <- genUUID UUIDV4
-                pure <<< TaskInfo $
+                taskInfo <- pure <<< TaskInfo $
                     baseTaskInfo { taskId = Value taskId
                                  , slaveId = offer.slaveId
                                  }
+                pure $ Tuple offer.id taskInfo
+            let taskInfos = snd <$> taskInfoTuples
             for (taskInfos <#> \(TaskInfo info) -> ReconcileTask { taskId: info.taskId, slaveId: Just info.slaveId }) registerTask
-            let acceptMessage =
-                    AcceptMessage cfg.frameworkId $ Accept
-                        { offerIds: offerIds
-                        , operations: (LaunchOperation <<< A.singleton) <$>  taskInfos
-                        , filters: Just $ Filters { refuseSeconds: Just 10.0 }
-                        }
-            lift $ accept' acceptMessage
+            let acceptMessages =
+                    (AcceptMessage cfg.frameworkId <<< Accept) <$> makeAccept <$> taskInfoTuples
+            lift $ for acceptMessages accept'
             pure unit
             where
                 offerIds = offers <#> \(Offer o) -> o.id
+                makeAccept (Tuple offerId taskInfo) =
+                    { offerIds: A.singleton offerId
+                    , operations: A.singleton <<< LaunchOperation <<< A.singleton $ taskInfo
+                    , filters: Just $ Filters { refuseSeconds: Just 10.0 }
+                    }
