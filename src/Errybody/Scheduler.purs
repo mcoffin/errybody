@@ -86,6 +86,12 @@ handleMessages cfg v = flip evalStateT initialState $ forever do
         handleUpdate :: ∀ eff0. TaskStatus -> StateT SchedulerState (Aff (err :: EXCEPTION, http :: HTTP.HTTP, avar :: AVAR, console :: CONSOLE, genuuid :: GENUUID | eff0)) Unit
         handleUpdate (TaskStatus status) = do
             maybeTask <- SM.lookup (unwrap status.taskId) <$> gets \s -> s.tasks
+            let maybeTaskId = maybeTask >>= \(ReconcileTask task) -> task.slaveId
+            case maybeTaskId of
+              Just taskId -> do
+                  modify \origState -> origState { slaves = SM.insert (unwrap taskId) (TaskStatus status) origState.slaves }
+                  pure unit
+              Nothing -> pure unit
             let maybeAcknowlegeMessage =
                     do
                         ReconcileTask task <- maybeTask
@@ -97,12 +103,9 @@ handleMessages cfg v = flip evalStateT initialState $ forever do
                             , uuid: uuid
                             }
             case maybeAcknowlegeMessage of
-              Just (AcknowlegeMessage fwid (Acknowlege ack)) -> do
-                  let acknowlegeMessage = AcknowlegeMessage fwid $ Acknowlege ack
+              Just acknowlegeMessage -> do
                   lift $ accept' acknowlegeMessage
-                  modify \origState -> origState { slaves = SM.insert (unwrap ack.slaveId) (TaskStatus status) origState.slaves }
                   pure unit
-              Just _ -> throwErrorS "We somehow created an AcknowlegeMessage that isn't an AcknowlegeMessage"
               Nothing -> pure unit
         handleOffers :: ∀ eff0. Array Offer -> StateT SchedulerState (Aff (err :: EXCEPTION, http :: HTTP.HTTP, avar :: AVAR, console :: CONSOLE, genuuid :: GENUUID | eff0)) Unit
         handleOffers offers = do
