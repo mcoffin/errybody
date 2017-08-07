@@ -12,7 +12,9 @@ import Control.Monad.State.Trans (StateT, evalStateT, gets, modify)
 import Control.Monad.Trans.Class (lift)
 import Data.Array (filter)
 import Data.Array as A
-import Data.Maybe (Maybe(..))
+import Data.Foldable (find)
+import Data.Maybe (Maybe(..), isJust)
+import Data.Monoid (mempty)
 import Data.Newtype (unwrap)
 import Data.StrMap (StrMap)
 import Data.StrMap as SM
@@ -130,7 +132,13 @@ handleMessages cfg v = flip evalStateT initialState $ forever do
             for (taskInfos <#> \(TaskInfo info) -> ReconcileTask { taskId: info.taskId, slaveId: Just info.slaveId }) registerTask
             let acceptMessages =
                     (AcceptMessage cfg.frameworkId <<< Accept) <$> makeAccept <$> taskInfoTuples
-            lift $ for acceptMessages accept'
+                relevantOfferIds = relevantOffers <#> \(Offer offer) -> offer.id
+                irrelevantOffers = flip filter offers \(Offer offer) -> not isJust $ find (eq offer.id) relevantOfferIds
+                rejectMessage = AcceptMessage cfg.frameworkId $ Accept { offerIds: irrelevantOffers <#> \(Offer offer) -> offer.id
+                                                                        , operations: mempty
+                                                                        , filters: Just $ Filters { refuseSeconds: Just 10.0 }
+                                                                        }
+            lift $ for (acceptMessages <> A.singleton rejectMessage) accept'
             pure unit
             where
                 offerIds = offers <#> \(Offer o) -> o.id
